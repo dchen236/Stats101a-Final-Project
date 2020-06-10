@@ -5,18 +5,18 @@ The dataset we will be using can be found at [processed_dataset.csv](https://git
 
 We adapted the [dataset from kaggle)[https://www.kaggle.com/zaheenhamidani/ultimate-spotify-tracks-db] containing songs of 27 genres.
 
-# Team Member
+### Team Member
 - Danni Chen
 - Yufeng Zhang
 
-# Data Codebook 
+### Data Codebook 
 
-### CSV files
+#### CSV files
 
 - [SpotifyFeatures.csv.zip](https://github.com/dchen236/Stats101a-Final-Project/blob/master/data/SpotifyFeatures.csv.zip) the original dataset from Kaggle in zipped format. 
 - [equally_sampled_songs.csv](https://github.com/dchen236/Stats101a-Final-Project/blob/master/data/equally_sampled_songs.csv): we sampled 100 songs from each genre, thus this dataset contains 2700 songs.
 
-### Attributes
+#### Attributes
 There are 14 attribuets we used in our analysis (equally_sampled_songs.csv)
 
 Numerical
