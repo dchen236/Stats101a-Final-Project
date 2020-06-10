@@ -1,0 +1,283 @@
+---
+title: "bigger_dataset"
+author: "Danni Chen - 705119383"
+date: "6/9/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+library(dplyr)
+#  first time only (use sample5000.csv after then )
+FIRST_TIME = TRUE
+if (!FIRST_TIME) {
+  songs <- read.csv("../data/equally_sampled_songs.csv")
+  drop_cols <- c("X", "artist_name", "track_id", "time_signature", "duration_ms")
+} else {
+  print("sampling songs")
+  songs <- read.csv("../data/SpotifyFeatures.csv")
+  set.seed(123)
+  songs <- songs %>% group_by(genre) %>% sample_n(100)  # sample 100 songs per genre
+  drop_cols <- c("artist_name", "track_id", "time_signature", "duration_ms")
+  write.csv(songs, "../data/equally_sampled_songs.csv")
+}
+
+
+songs['duration_s'] <- songs$duration_ms / 1000
+songs <- songs %>% select(-one_of(drop_cols))
+```
+
+
+### Make sure each genre has 100 tracks
+
+```{r}
+table(songs$genre)
+```
+
+
+
+### Fit a full model
+
+```{r}
+full_model <- lm(popularity ~ . - track_name, data  = songs)
+summary(full_model)
+```
+
+
+```{r}
+plot(full_model)
+```
+
+### Marginal Plots looks good 
+
+##### instrumentalness and duration_s is a bit probalematic
+
+```{r}
+library(car)
+suppressWarnings({mmps(full_model)})
+```
+
+
+### There are 1745 bad leverage points and 128 high influential points out of 2700 observations, which means the model is vulnerable 
+
+```{r}
+bad_leverages <- function(model, df){
+  res <- residuals(model)
+  hatvals <- hatvalues(model)
+  hatvals[abs(res) > 4 & hatvals > 4 / nrow(df)] # use 4 because this is a relatively large dataset
+}
+
+high_influentials <- function(model, df) {
+  cook <- cooks.distance(model)
+  cook[cook > 4 / (nrow(df) - 2)]
+}
+
+length(bad_leverages(full_model, songs))
+length(high_influentials(full_model, songs))
+```
+
+
+#### normalize attribuets range to (0, 100]
+
+```{r}
+# scale everything to 0 to 1 except for popularity and duration in seconds
+transformed_songs <- songs
+transformed_songs['popularity'] <- (transformed_songs['popularity'] + 0.001 ) * 100
+transformed_songs['instrumentalness'] <- (transformed_songs['instrumentalness'] + 0.001) * 100 
+transformed_songs['loudness'] <-( (transformed_songs['loudness'] + 60) / 60 + 0.01) * 100 
+transformed_songs['valence'] <- (transformed_songs['valence'] + 0.001) * 100
+transformed_songs['tempo'] <-( transformed_songs['tempo'] / 240 + 0.001) * 100
+
+transformed_songs['acousticness'] <-transformed_songs['acousticness'] * 100
+transformed_songs['danceability'] <-transformed_songs['danceability'] * 100
+transformed_songs['energy'] <-transformed_songs['energy'] * 100
+transformed_songs['liveness'] <-transformed_songs['liveness'] * 100
+transformed_songs['speechiness'] <-transformed_songs['speechiness'] * 100
+transformed_songs['valence'] <-transformed_songs['valence'] * 100
+```
+
+
+### This suggesting no transformation on popularity is better
+
+```{r}
+library(alr3) 
+# inverse Response Plot
+invResPlot(lm(popularity ~ . - genre - track_name 
+                           - key - mode
+            , data  = transformed_songs))
+```
+
+
+### Transform predictors
+
+```{r}
+summary(powerTransform(cbind(acousticness = transformed_songs$acousticness, 
+                             danceability = transformed_songs$danceability,
+                             duration_s = transformed_songs$duration_s, 
+                             energy = transformed_songs$energy,
+                             instrumentalness = transformed_songs$instrumentalness,
+                             liveness = transformed_songs$liveness,
+                             loudness = transformed_songs$loudness,
+                            speechiness = transformed_songs$speechiness,
+                             tempo =transformed_songs$tempo,
+                            valance = transformed_songs$valence
+                             ) ~ 1))
+```
+
+
+#### using estimated poweres 
+
+
+```{r}
+transformed_model <- lm(popularity ~ genre + mode +  key + # categorical variables 
+                                  I(acousticness^0.38) + I(danceability^1.08) +
+                                  I(energy^0.84) + I(instrumentalness^-0.46) +
+                                  I(liveness^-0.33) + I(loudness^4.16) + I(speechiness^-0.71) +
+                                  I(tempo^0.33) + I(valence^0.5) +
+                                  I(duration_s^0.25),
+                        data = transformed_songs)
+mmps(transformed_model)
+```
+
+
+```{r}
+plot(transformed_model)
+```
+
+
+
+```{r}
+summary(transformed_model)
+```
+
+
+
+```{r}
+require(leaps)
+
+AIC_fom_BIC <- function(BIC, p = length(BIC), n = nrow(transformed_songs)) {
+  (BIC - log(n) * p + 2 * p)
+}
+select_model <- function(method = "exhaustive"){
+  if (method == "exhaustive") { # categorical key is not significant in full model, forward selection and backward selection
+                                # the selection takes forever using exhaustive method thus elimiate categorical variable key
+      select <- regsubsets(popularity ~ genre + mode +  
+                                  I(acousticness^0.38) + I(danceability^1.08) +
+                                  I(energy^0.84) + I(instrumentalness^-0.46) +
+                                  I(liveness^-0.33) + I(loudness^4.16) + I(speechiness^-0.71) +
+                                  I(tempo^0.33) + I(valence^0.5) +
+                                  I(duration_s^0.25),
+                          data = transformed_songs,
+                         method = method,
+                         nvmax=50)
+  } else {
+      select <- regsubsets(popularity ~ genre + mode +  key + # categorical variables 
+                                  I(acousticness^0.38) + I(danceability^1.08) +
+                                  I(energy^0.84) + I(instrumentalness^-0.46) +
+                                  I(liveness^-0.33) + I(loudness^4.16) + I(speechiness^-0.71) +
+                                  I(tempo^0.33) + I(valence^0.5) +
+                                  I(duration_s^0.25),
+                          data = transformed_songs,
+                         method = method,
+                         nvmax=50)
+  }
+  
+  bic <- summary(select)$bic
+  aic <- AIC_fom_BIC(bic)
+  print(paste("min bic: ", which(bic == min(bic)), sep = ""))
+  print(paste("min aic: ", which(aic == min(aic)), sep = ""))
+  par(mfrow = c(1, 2))
+  p <- length(bic)
+  plot(1:p, bic, main = "BIC")
+  lines(1:p, bic)
+  p <- length(aic)
+  plot(1:p, aic, main = "AIC")
+  lines(1:p, aic)
+  summary(select)
+}
+```
+
+### forward model selection, conclusion is using genre, loudness and energy
+
+```{r}
+sum <- select_model("forward")
+```
+
+
+```{r}
+options(max.print=999999)
+sum
+```
+
+### backward model selection, conclusion is using genre, loudness and energy
+
+```{r}
+sum <- select_model("backward")
+```
+
+```{r}
+options(max.print=999999)
+sum
+```
+
+
+### Exhaustive model selection, conclusion is using genre, loudness and energy
+
+```{r}
+sum <- select_model()
+```
+
+
+
+```{r}
+options(max.print=999999)
+sum
+```
+
+
+### Using suggested predictors
+
+```{r}
+selected_model <- lm(popularity ~ genre +
+                                  I(energy^0.84)  +
+                                  I(loudness^4.16),
+                        data = transformed_songs)
+plot(selected_model)
+```
+
+
+
+```{r}
+# save for exploratory dataset analysis
+# bad_inf_indices <- as.integer(names(bad_leverages(selected_model,  songs)))
+# songs[, "bad_influential"] <- "No"
+# songs[bad_inf_indices, "bad_influential"] <- "Yes"
+# write.csv(songs, "../data/equally_sampled_songs.csv")
+```
+
+
+
+
+
+
+
+<!-- ### Interactive predictors -->
+
+<!-- different slope and intercept for different genre -->
+
+<!-- ```{r} -->
+<!-- selected_model2 <- lm(popularity ~ genre * I(energy^0.84)  + -->
+<!--                                    genre * I(loudness^4.16), -->
+<!--                         data = transformed_songs) -->
+<!-- plot(selected_model2) -->
+<!-- ``` -->
+
+
+<!-- I tried interactive predictor, but the result shows it's not significant and models doesnt' improve -->
+<!-- ```{r} -->
+<!-- summary(selected_model2) -->
+<!-- ``` -->
